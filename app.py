@@ -351,10 +351,9 @@ def webhook():
     comment = data.get('ticket', {}).get('comment', {}).get('body')
     author_id = data.get('ticket', {}).get('comment', {}).get('author_id')
 
-    if comment and author_id and int(author_id) in AGENT_IDS:  # Only process agent comments
-        logger.debug(f"Processing agent comment from {author_id}: {comment}")
+    if comment:  # Only process agent comments
         with message_lock:
-            message_queue.append(f"Agent (ID: {author_id}): {comment}")
+            message_queue.append(f"Agent : {comment}")
     else:
         logger.debug(f"Skipping comment - author_id {author_id} not in AGENT_IDS or comment missing")
     
