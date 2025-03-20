@@ -16,16 +16,9 @@ ZENDESK_EMAIL = "ambikeshjha07@gmail.com"
 ZENDESK_API_TOKEN = "hWL2MYxrucJaGJRkgT3YHPibYasaDQUzXcb9X0Nv"
 ZENDESK_API_URL = f"https://{ZENDESK_SUBDOMAIN}.zendesk.com/api/v2"
 
-# AGENT_IDS = [19035726117532, 19059726748444, 19059774975772, 19103307476764]
-GROUP_ID = 19035713601692
-
-# Global variables
-current_ticket_id = None
-message_queue = []
-message_lock = Lock()
-
+# Function to fetch all user IDs from Zendesk (agents, admins, and end-users)
 def fetch_all_user_ids():
-    url = f"{ZENDESK_API_URL}/users.json?role[]=agent&role[]=admin"
+    url = f"{ZENDESK_API_URL}/users.json"
     headers = {"Content-Type": "application/json"}
     auth = (f"{ZENDESK_EMAIL}/token", ZENDESK_API_TOKEN)
     user_ids = []
@@ -48,6 +41,14 @@ def fetch_all_user_ids():
 AGENT_IDS = fetch_all_user_ids()
 logger.info(f"Fetched {len(AGENT_IDS)} user IDs: {AGENT_IDS}")
 
+GROUP_ID = 19035713601692
+
+# Global variables
+current_ticket_id = None
+message_queue = []
+message_lock = Lock()
+chat_history = []  # To store bot-user conversation history
+
 # Simple chatbot responses
 responses = {
     "hi": "Hello! How can I help you today?",
@@ -60,15 +61,21 @@ responses = {
 }
 
 def create_ticket(message):
+    # Format the chat history into a readable string
+    transcript = "Chat History Before Handover:\n"
+    for entry in chat_history:
+        transcript += f"{entry['source']}: {entry['message']}\n"
+    transcript += f"\nCustomer Message: {message}"
+
     url = f"{ZENDESK_API_URL}/tickets.json"
     headers = {"Content-Type": "application/json"}
     auth = (f"{ZENDESK_EMAIL}/token", ZENDESK_API_TOKEN)
     payload = {
         "ticket": {
             "subject": "Chatbot Escalation to Human Agent",
-            "comment": {"body": message},
+            "comment": {"body": transcript},  # Send the full transcript
             "priority": "normal",
-            "requester": {"name": "Chatbot User", "email": "chatbot.user@example.com"}  # Optional: Set a requester
+            "requester": {"name": "Chatbot User", "email": "chatbot.user@example.com"}
         }
     }
     response = requests.post(url, json=payload, headers=headers, auth=auth)
@@ -150,15 +157,14 @@ def webhook():
     logger.debug(f"Webhook received: {data}")
     
     ticket_id = data.get('ticket_id')
-    if not ticket_id or ticket_id != str(current_ticket_id):  # Ensure ticket_id matches current session
+    if not ticket_id or ticket_id != str(current_ticket_id):
         logger.debug(f"Ignoring webhook - ticket_id {ticket_id} does not match current_ticket_id {current_ticket_id}")
         return jsonify({"status": "ignored"}), 200
 
-    # Extract comment and author_id
     comment = data.get('ticket', {}).get('comment', {}).get('body')
     author_id = data.get('ticket', {}).get('comment', {}).get('author_id')
 
-    if comment and author_id and int(author_id) in AGENT_IDS:  # Only process agent comments
+    if comment and author_id and int(author_id) in AGENT_IDS:
         logger.debug(f"Processing agent comment from {author_id}: {comment}")
         with message_lock:
             message_queue.append(f"Agent (ID: {author_id}): {comment}")
@@ -179,29 +185,34 @@ def stream():
 
 @app.route('/')
 def home():
-    global current_ticket_id, message_queue
-    # Only reset if no active ticket
+    global current_ticket_id, message_queue, chat_history
     if not current_ticket_id:
         message_queue = []
+        chat_history = []  # Reset chat history on new session
     return render_template('index.html')
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    global current_ticket_id
+    global current_ticket_id, chat_history
     user_input = request.json.get('message', '').lower().strip()
     if not user_input:
         return jsonify({'response': "Please say something!"})
 
+    # Add user message to chat history
+    chat_history.append({"source": "User", "message": user_input})
+
     if user_input == "human_handover":
         ticket_id, create_response = create_ticket("Customer requested human agent.")
         if ticket_id:
-            current_ticket_id = ticket_id  # Update current_ticket_id immediately
+            current_ticket_id = ticket_id
             assign_response = assign_ticket(ticket_id)
             response = f"{create_response} Ticket ID: {ticket_id}. {assign_response}"
         else:
             response = create_response
     else:
         response = responses.get(user_input, "I’m not sure how to respond to that. Ask for a human agent by clicking 'Talk to agent' button above")
+        # Add bot response to chat history
+        chat_history.append({"source": "Bot", "message": response})
     return jsonify({'response': response})
 
 if __name__ == "__main__":
