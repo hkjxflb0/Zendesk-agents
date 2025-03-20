@@ -7,31 +7,24 @@
 # # logging.basicConfig(level=logging.DEBUG)
 # # logger = logging.getLogger(__name__)
 # # from pyngrok import ngrok
- 
+
 # # app = Flask(__name__)
- 
-# # # Zendesk API configuration (replace with your own details)
-# # ZENDESK_SUBDOMAIN = "netsmartz3231"  
+
+# # # Zendesk API configuration
+# # ZENDESK_SUBDOMAIN = "netsmartz3231"
 # # ZENDESK_EMAIL = "ambikeshjha07@gmail.com"
 # # ZENDESK_API_TOKEN = "hWL2MYxrucJaGJRkgT3YHPibYasaDQUzXcb9X0Nv"
 # # ZENDESK_API_URL = f"https://{ZENDESK_SUBDOMAIN}.zendesk.com/api/v2"
- 
-# # # # Hardcoded agent and group IDs (replace with real IDs from your Zendesk)
-# # # AGENT_ID = 19035726117532  # Ambikesh Jha
-# # # # AGENT_ID = 19035726117532  # Test user
- 
-# # # List of agent IDs (replace with your three agents' real IDs)
-# # AGENT_IDS = [19035726117532, 19059726748444, 19059774975772,19103307476764]  
-# # GROUP_ID = 19035713601692  # Example group ID (all agents should belong to this group)
- 
-# # last_agent_index = -1
- 
-# # # Store the current ticket ID and messages
+
+# # AGENT_IDS = [19035726117532, 19059726748444, 19059774975772, 19103307476764]
+# # GROUP_ID = 19035713601692
+
+# # # Global variables
 # # current_ticket_id = None
 # # message_queue = []
 # # message_lock = Lock()
- 
-# # # Simple chatbot responses
+
+# # # Simple chatbot responses (used only before handover)
 # # responses = {
 # #     "hi": "Hello! How can I help you today?",
 # #     "hello": "Hi there! How can I assist you?",
@@ -41,8 +34,7 @@
 # #     "i want to talk to a human": "Sure, I’ll assign a human agent to you shortly.",
 # #     "help": "I’m here to help! What do you need assistance with?"
 # # }
- 
-# # # Function to create a ticket in Zendesk
+
 # # def create_ticket(message):
 # #     url = f"{ZENDESK_API_URL}/tickets.json"
 # #     headers = {"Content-Type": "application/json"}
@@ -51,17 +43,40 @@
 # #         "ticket": {
 # #             "subject": "Chatbot Escalation to Human Agent",
 # #             "comment": {"body": message},
-# #             "priority": "normal"
+# #             "priority": "normal",
+# #             "requester": {"name": "Chatbot User", "email": "chatbot.user@example.com"}
 # #         }
 # #     }
 # #     response = requests.post(url, json=payload, headers=headers, auth=auth)
 # #     if response.status_code == 201:
 # #         ticket_data = response.json()
-# #         return ticket_data["ticket"]["id"], "Ticket created successfully!"
+# #         ticket_id = ticket_data["ticket"]["id"]
+# #         logger.debug(f"Ticket created: {ticket_data}")
+# #         return ticket_id, "Ticket created successfully!"
 # #     else:
+# #         logger.error(f"Failed to create ticket: {response.text}")
 # #         return None, f"Failed to create ticket: {response.text}"
- 
- 
+
+# # def update_ticket(ticket_id, message):
+# #     url = f"{ZENDESK_API_URL}/tickets/{ticket_id}.json"
+# #     headers = {"Content-Type": "application/json"}
+# #     auth = (f"{ZENDESK_EMAIL}/token", ZENDESK_API_TOKEN)
+# #     payload = {
+# #         "ticket": {
+# #             "comment": {
+# #                 "body": message,
+# #                 "public": True  # Ensures the comment is visible to the requester
+# #             }
+# #         }
+# #     }
+# #     response = requests.put(url, json=payload, headers=headers, auth=auth)
+# #     if response.status_code == 200:
+# #         logger.debug(f"Comment added to ticket {ticket_id}: {message}")
+# #         return True, "Message sent to agent successfully!"
+# #     else:
+# #         logger.error(f"Failed to update ticket {ticket_id}: {response.text}")
+# #         return False, f"Failed to send message to agent: {response.text}"
+
 # # def get_least_busy_agent(channel="support"):
 # #     url = f"{ZENDESK_API_URL}/agent_availabilities"
 # #     headers = {
@@ -70,56 +85,41 @@
 # #         "Zendesk-Api-Version": "2023-02-01"
 # #     }
 # #     auth = (f"{ZENDESK_EMAIL}/token", ZENDESK_API_TOKEN)
- 
+
 # #     agent_ids_str = ",".join(str(agent_id) for agent_id in AGENT_IDS)
 # #     params = {
 # #         "filter[agent_id]": agent_ids_str,
-# #         "filter[channel_status]": f"{channel}:online",  # Only online agents
+# #         "filter[channel_status]": f"{channel}:online",
 # #     }
- 
-# #     logger.debug(f"Fetching availability: {url} with params {params}")
+
 # #     response = requests.get(url, params=params, headers=headers, auth=auth)
 # #     if response.status_code != 200:
-# #         logger.error(f"API error: {response.status_code} - {response.text}")
 # #         raise Exception(f"Failed to fetch agent availability: {response.text}")
- 
+
 # #     data = response.json()
-# #     logger.debug(f"Raw API response: {data}")
- 
 # #     agents = data.get("data", [])
 # #     if not agents:
-# #         logger.warning("No agents found.")
 # #         raise Exception("No online agents found for channel 'support'.")
- 
+
 # #     agent_workloads = {}
-# #     included_channels = {item["id"]: item["attributes"] for item in data.get("included", []) if
-# #                          item["type"] == "channels"}
-# #     logger.debug(f"Included channels: {included_channels}")
- 
+# #     included_channels = {item["id"]: item["attributes"] for item in data.get("included", []) if item["type"] == "channels"}
 # #     for agent in agents:
 # #         agent_id = agent["attributes"]["agent_id"]
 # #         channel_refs = agent["relationships"]["channels"]["data"]
-# #         logger.debug(f"Agent {agent_id} channel refs: {channel_refs}")
 # #         for ref in channel_refs:
 # #             channel_data = included_channels.get(ref["id"])
 # #             if channel_data and channel_data["name"] == channel:
 # #                 work_items = channel_data.get("work_item_count", 0)
 # #                 agent_workloads[agent_id] = work_items
-# #                 logger.debug(f"Agent {agent_id} has {work_items} work items in {channel}")
 # #                 break
- 
+
 # #     if not agent_workloads:
-# #         logger.error("No workload data found.")
 # #         raise Exception(f"No workload data found for channel '{channel}'.")
- 
-# #     logger.debug(f"Agent workloads: {agent_workloads}")
+
 # #     least_busy_agent = min(agent_workloads, key=agent_workloads.get)
 # #     min_work_items = agent_workloads[least_busy_agent]
- 
-# #     logger.info(f"Selected agent {least_busy_agent} with {min_work_items} work items")
 # #     return least_busy_agent, min_work_items
- 
- 
+
 # # def assign_ticket(ticket_id):
 # #     try:
 # #         agent_id, work_items = get_least_busy_agent(channel="support")
@@ -139,32 +139,30 @@
 # #             return f"Failed to assign ticket: {response.text}"
 # #     except Exception as e:
 # #         return f"Error during assignment: {str(e)}"
- 
- 
-# # # Webhook endpoint to receive Zendesk updates
+
 # # @app.route('/webhook', methods=['POST'])
 # # def webhook():
 # #     global current_ticket_id, message_queue
 # #     data = request.json
-# #     print("*******************",data)
 # #     logger.debug(f"Webhook received: {data}")
+    
 # #     ticket_id = data.get('ticket_id')
-# #     print("**********",ticket_id,current_ticket_id)
-# #     # if ticket_id != current_ticket_id:
-# #     #     print("Ignoring ticket ID mismatch")
-# #     #     return jsonify({"status": "ignored"}), 200
-# #     print("**********",data.get('ticket', {}).get('comment', {}).get('body'))
-# #     # Extract the latest comment from the webhook payload
+# #     if not ticket_id or ticket_id != str(current_ticket_id):  # Ensure ticket_id matches current session
+# #         logger.debug(f"Ignoring webhook - ticket_id {ticket_id} does not match current_ticket_id {current_ticket_id}")
+# #         return jsonify({"status": "ignored"}), 200
+
+# #     # Extract comment and author_id
 # #     comment = data.get('ticket', {}).get('comment', {}).get('body')
 # #     author_id = data.get('ticket', {}).get('comment', {}).get('author_id')
-# #     print("**********",comment)
-# #     if comment:  # Only agent comments
-# #         print("*****coment inside*****",comment)
-# #         message_queue.append(f"Agent : {comment}")
-# #         print("***",message_queue)
+
+# #     if comment:  # Only process agent comments
+# #         with message_lock:
+# #             message_queue.append(f"Agent : {comment}")
+# #     else:
+# #         logger.debug(f"Skipping comment - author_id {author_id} not in AGENT_IDS or comment missing")
+    
 # #     return jsonify({"status": "received"}), 200
- 
-# # # SSE endpoint for real-time updates
+
 # # @app.route('/stream')
 # # def stream():
 # #     def event_stream():
@@ -172,48 +170,53 @@
 # #             with message_lock:
 # #                 if message_queue:
 # #                     yield f"data: {json.dumps({'response': message_queue.pop(0)})}\n\n"
-# #             time.sleep(1)  # Adjust frequency as needed
+# #             time.sleep(1)
 # #     return Response(event_stream(), mimetype="text/event-stream")
- 
-# # # Home route to render the UI
+
 # # @app.route('/')
 # # def home():
 # #     global current_ticket_id, message_queue
-# #     current_ticket_id = None
-# #     message_queue = []
+# #     if not current_ticket_id:
+# #         message_queue = []
 # #     return render_template('index.html')
 
-
-# # # API route to handle chatbot input
 # # @app.route('/chat', methods=['POST'])
 # # def chat():
 # #     global current_ticket_id
-# #     user_input = request.json.get('message').lower().strip()
+# #     user_input = request.json.get('message', '').lower().strip()
 # #     if not user_input:
 # #         return jsonify({'response': "Please say something!"})
 
-# #     if user_input == "human_handover":  # Check for button trigger
+# #     # If a ticket is active, send the message to Zendesk instead of processing locally
+# #     if current_ticket_id:
+# #         success, response = update_ticket(current_ticket_id, user_input)
+# #         if success:
+# #             # Optionally add the user's message to the local queue for display
+# #             with message_lock:
+# #                 message_queue.append(f"You: {user_input}")
+# #         return jsonify({'response': response})
+    
+# #     # Otherwise, handle with chatbot logic
+# #     if user_input == "human_handover":
 # #         ticket_id, create_response = create_ticket("Customer requested human agent.")
-# #         print(create_response)
-
 # #         if ticket_id:
-# #             assign_response = assign_ticket(ticket_id)
 # #             current_ticket_id = ticket_id
+# #             assign_response = assign_ticket(ticket_id)
 # #             response = f"{create_response} Ticket ID: {ticket_id}. {assign_response}"
 # #         else:
 # #             response = create_response
 # #     else:
-# #         response = responses.get(user_input, "I’m not sure how to respond to that. ask for a human agent! by clicking 'Talk to agent' button above")
+# #         response = responses.get(user_input, "I’m not sure how to respond to that. Ask for a human agent by clicking 'Talk to agent' button above")
 # #     return jsonify({'response': response})
- 
 
 # # if __name__ == "__main__":
-# #     ngrok.set_auth_token("2sL0plCt2Nt0XbX5xGcPwPpX2EQ_6NhM4CevXbvjA5BDugjNB")  # Set your ngrok auth token
+# #     ngrok.set_auth_token("2sL0plCt2Nt0XbX5xGcPwPpX2EQ_6NhM4CevXbvjA5BDugjNB")
 # #     public_url = ngrok.connect(5000).public_url
 # #     print(f"ngrok tunnel opened at: {public_url}")
 # #     print(f"Set your Zendesk webhook to: {public_url}/webhook")
-
 # #     app.run(host="0.0.0.0", port=5000)
+
+
 
 # from flask import Flask, render_template, request, jsonify, Response
 # import requests
@@ -233,15 +236,44 @@
 # ZENDESK_API_TOKEN = "hWL2MYxrucJaGJRkgT3YHPibYasaDQUzXcb9X0Nv"
 # ZENDESK_API_URL = f"https://{ZENDESK_SUBDOMAIN}.zendesk.com/api/v2"
 
-# AGENT_IDS = [19035726117532, 19059726748444, 19059774975772, 19103307476764]
+
+
+# # Function to fetch all user IDs from Zendesk (agents, admins, and end-users)
+# def fetch_all_user_ids():
+#     url = f"{ZENDESK_API_URL}/users.json"
+#     headers = {"Content-Type": "application/json"}
+#     auth = (f"{ZENDESK_EMAIL}/token", ZENDESK_API_TOKEN)
+#     user_ids = []
+ 
+#     while url:
+#         response = requests.get(url, headers=headers, auth=auth)
+#         if response.status_code == 200:
+#             data = response.json()
+#             for user in data["users"]:
+#                 user_ids.append(user["id"])
+#             url = data.get("next_page")
+#             logger.debug(f"Fetched {len(data['users'])} users, next page: {url}")
+#         else:
+#             logger.error(f"Failed to fetch users: {response.status_code} - {response.text}")
+#             break
+ 
+#     return user_ids
+ 
+# # Fetch all user IDs at startup
+# AGENT_IDS = fetch_all_user_ids()
+# logger.info(f"Fetched {len(AGENT_IDS)} user IDs: {AGENT_IDS}")
+
+
+# # AGENT_IDS = [19035726117532, 19059726748444, 19059774975772, 19103307476764]
 # GROUP_ID = 19035713601692
 
 # # Global variables
 # current_ticket_id = None
 # message_queue = []
 # message_lock = Lock()
+# chat_history = []
 
-# # Simple chatbot responses
+# # Simple chatbot responses (used only before handover)
 # responses = {
 #     "hi": "Hello! How can I help you today?",
 #     "hello": "Hi there! How can I assist you?",
@@ -252,24 +284,59 @@
 #     "help": "I’m here to help! What do you need assistance with?"
 # }
 
+# requester_id = None
+
+# # Create a ticket and store the requester_id
 # def create_ticket(message):
+#     global requester_id
+
+#     # Format the chat history into a readable string
+#     transcript = "Chat History Before Handover:\n"
+#     for entry in chat_history:
+#         transcript += f"{entry['source']}: {entry['message']}\n"
+#     transcript += f"\nCustomer Message: {message}"
 #     url = f"{ZENDESK_API_URL}/tickets.json"
 #     headers = {"Content-Type": "application/json"}
 #     auth = (f"{ZENDESK_EMAIL}/token", ZENDESK_API_TOKEN)
+
 #     payload = {
 #         "ticket": {
 #             "subject": "Chatbot Escalation to Human Agent",
 #             "comment": {"body": message},
 #             "priority": "normal",
-#             "requester": {"name": "Chatbot User", "email": "chatbot.user@example.com"}  # Optional: Set a requester
+#             "requester": {"name": "Chatbot User", "email": "chatbot.user@example.com"}
 #         }
 #     }
 #     response = requests.post(url, json=payload, headers=headers, auth=auth)
 #     if response.status_code == 201:
 #         ticket_data = response.json()
-#         return ticket_data["ticket"]["id"], "Ticket created successfully!"
+#         ticket_id = ticket_data["ticket"]["id"]
+#         requester_id = ticket_data["ticket"]["requester_id"]  # Save the user's ID
+#         return ticket_id, "Ticket created successfully!"
 #     else:
-#         return None, f"Failed to create ticket: {response.text}"
+#         return None, "Failed to create ticket."
+
+# # Update the ticket with the correct author
+# def update_ticket(ticket_id, message):
+#     global requester_id
+#     url = f"{ZENDESK_API_URL}/tickets/{ticket_id}.json"
+#     headers = {"Content-Type": "application/json"}
+#     auth = (f"{ZENDESK_EMAIL}/token", ZENDESK_API_TOKEN)
+#     payload = {
+#         "ticket": {
+#             "comment": {
+#                 "body": message,
+#                 "public": True,
+#                 "author_id": requester_id  # Use the user's ID
+#             }
+#         }
+#     }
+#     response = requests.put(url, json=payload, headers=headers, auth=auth)
+#     if response.status_code == 200:
+#         return True, "Message sent to agent successfully!"
+#     else:
+#         return False, "Failed to send message."
+    
 
 # def get_least_busy_agent(channel="support"):
 #     url = f"{ZENDESK_API_URL}/agent_availabilities"
@@ -286,10 +353,8 @@
 #         "filter[channel_status]": f"{channel}:online",
 #     }
 
-#     logger.debug(f"Fetching availability: {url} with params {params}")
 #     response = requests.get(url, params=params, headers=headers, auth=auth)
 #     if response.status_code != 200:
-#         logger.error(f"API error: {response.status_code} - {response.text}")
 #         raise Exception(f"Failed to fetch agent availability: {response.text}")
 
 #     data = response.json()
@@ -338,25 +403,29 @@
 
 # @app.route('/webhook', methods=['POST'])
 # def webhook():
-#     global current_ticket_id, message_queue
+#     global current_ticket_id, message_queue, requester_id
 #     data = request.json
 #     logger.debug(f"Webhook received: {data}")
-    
+
 #     ticket_id = data.get('ticket_id')
-#     if not ticket_id or ticket_id != str(current_ticket_id):  # Ensure ticket_id matches current session
+#     if not ticket_id or ticket_id != str(current_ticket_id):
 #         logger.debug(f"Ignoring webhook - ticket_id {ticket_id} does not match current_ticket_id {current_ticket_id}")
 #         return jsonify({"status": "ignored"}), 200
 
-#     # Extract comment and author_id
 #     comment = data.get('ticket', {}).get('comment', {}).get('body')
 #     author_id = data.get('ticket', {}).get('comment', {}).get('author_id')
 
-#     if comment:  # Only process agent comments
-#         with message_lock:
-#             message_queue.append(f"Agent : {comment}")
-#     else:
-#         logger.debug(f"Skipping comment - author_id {author_id} not in AGENT_IDS or comment missing")
-    
+#     if comment:
+        
+#         if author_id in AGENT_IDS or author_id == "" or author_id == " " or author_id == None:  # Only process agent messages
+#             with message_lock:
+#                 message_queue.append(f"Agent: {comment}")
+#         elif author_id == requester_id:  # Ignore user messages
+#             pass
+#         else:
+#             logger.debug(f"Skipping comment - author_id {author_id} not in AGENT_IDS or comment missing")
+#             with message_lock:
+#                 message_queue.append(f"User: {comment}")
 #     return jsonify({"status": "received"}), 200
 
 # @app.route('/stream')
@@ -371,30 +440,40 @@
 
 # @app.route('/')
 # def home():
-#     global current_ticket_id, message_queue
-#     # Only reset if no active ticket
+#     global current_ticket_id, message_queue, chat_history
 #     if not current_ticket_id:
 #         message_queue = []
+#         chat_history = []
 #     return render_template('index.html')
 
 # @app.route('/chat', methods=['POST'])
 # def chat():
-#     global current_ticket_id
-#     user_input = request.json.get('message', '').lower().strip()
+#     global current_ticket_id, requester_id, chat_history
+#     user_input = request.json.get('message', '').strip()
 #     if not user_input:
 #         return jsonify({'response': "Please say something!"})
+    
+#     chat_history.append({"source": "User", "message": user_input})
 
-#     if user_input == "human_handover":
+#     if current_ticket_id:  # If a ticket exists (human handover)
+#         success, response = update_ticket(current_ticket_id, user_input)
+#         # Don’t add user_input to the message queue here
+
+#         return jsonify({'response': response})
+
+#     if user_input.lower() == "human_handover":
 #         ticket_id, create_response = create_ticket("Customer requested human agent.")
 #         if ticket_id:
-#             current_ticket_id = ticket_id  # Update current_ticket_id immediately
+#             current_ticket_id = ticket_id
 #             assign_response = assign_ticket(ticket_id)
 #             response = f"{create_response} Ticket ID: {ticket_id}. {assign_response}"
 #         else:
 #             response = create_response
 #     else:
 #         response = responses.get(user_input, "I’m not sure how to respond to that. Ask for a human agent by clicking 'Talk to agent' button above")
+#         chat_history.append({"source": "Bot", "message": response})
 #     return jsonify({'response': response})
+
 
 # if __name__ == "__main__":
 #     ngrok.set_auth_token("2sL0plCt2Nt0XbX5xGcPwPpX2EQ_6NhM4CevXbvjA5BDugjNB")
@@ -412,23 +491,49 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 from pyngrok import ngrok
-
+ 
 app = Flask(__name__)
-
+ 
 # Zendesk API configuration
 ZENDESK_SUBDOMAIN = "netsmartz3231"
 ZENDESK_EMAIL = "ambikeshjha07@gmail.com"
 ZENDESK_API_TOKEN = "hWL2MYxrucJaGJRkgT3YHPibYasaDQUzXcb9X0Nv"
 ZENDESK_API_URL = f"https://{ZENDESK_SUBDOMAIN}.zendesk.com/api/v2"
-
-AGENT_IDS = [19035726117532, 19059726748444, 19059774975772, 19103307476764]
+ 
+ 
+# Function to fetch agents IDs from Zendesk (agents, admins)
+def fetch_all_user_ids():
+    url = f"{ZENDESK_API_URL}/users.json?role[]=agent&role[]=admin"
+    headers = {"Content-Type": "application/json"}
+    auth = (f"{ZENDESK_EMAIL}/token", ZENDESK_API_TOKEN)
+    user_ids = []
+ 
+    while url:
+        response = requests.get(url, headers=headers, auth=auth)
+        if response.status_code == 200:
+            data = response.json()
+            for user in data["users"]:
+                user_ids.append(user["id"])
+            url = data.get("next_page")
+            logger.debug(f"Fetched {len(data['users'])} users, next page: {url}")
+        else:
+            logger.error(f"Failed to fetch users: {response.status_code} - {response.text}")
+            break
+ 
+    return user_ids
+ 
+# Fetch all user IDs at startup
+AGENT_IDS = fetch_all_user_ids()
+logger.info(f"Fetched {len(AGENT_IDS)} user IDs: {AGENT_IDS}")
+ 
 GROUP_ID = 19035713601692
-
+ 
 # Global variables
 current_ticket_id = None
 message_queue = []
 message_lock = Lock()
-
+chat_history = []
+ 
 # Simple chatbot responses (used only before handover)
 responses = {
     "hi": "Hello! How can I help you today?",
@@ -439,15 +544,30 @@ responses = {
     "i want to talk to a human": "Sure, I’ll assign a human agent to you shortly.",
     "help": "I’m here to help! What do you need assistance with?"
 }
-
+ 
+requester_id = None
+ 
+# Create a ticket and store the requester_id
 def create_ticket(message):
+    global requester_id
+ 
+    # Format the chat history into a readable string
+    transcript = "Chat History Before Handover:\n"
+    if chat_history:
+        for entry in chat_history:
+            transcript += f"{entry['source']}: {entry['message']}\n"
+    else:
+        transcript += "No prior chat history.\n"
+    transcript += f"\nCustomer Message Triggering Handover: {message}"
+ 
     url = f"{ZENDESK_API_URL}/tickets.json"
     headers = {"Content-Type": "application/json"}
     auth = (f"{ZENDESK_EMAIL}/token", ZENDESK_API_TOKEN)
+ 
     payload = {
         "ticket": {
             "subject": "Chatbot Escalation to Human Agent",
-            "comment": {"body": message},
+            "comment": {"body": transcript},  # Use the full transcript here
             "priority": "normal",
             "requester": {"name": "Chatbot User", "email": "chatbot.user@example.com"}
         }
@@ -456,13 +576,14 @@ def create_ticket(message):
     if response.status_code == 201:
         ticket_data = response.json()
         ticket_id = ticket_data["ticket"]["id"]
-        logger.debug(f"Ticket created: {ticket_data}")
-        return ticket_id, "Ticket created successfully!"
+        requester_id = ticket_data["ticket"]["requester_id"]  # Save the user's ID
+        return ticket_id, "Ticket created successfully with transcript!"
     else:
-        logger.error(f"Failed to create ticket: {response.text}")
         return None, f"Failed to create ticket: {response.text}"
-
+ 
+# Update the ticket with the correct author
 def update_ticket(ticket_id, message):
+    global requester_id
     url = f"{ZENDESK_API_URL}/tickets/{ticket_id}.json"
     headers = {"Content-Type": "application/json"}
     auth = (f"{ZENDESK_EMAIL}/token", ZENDESK_API_TOKEN)
@@ -470,18 +591,18 @@ def update_ticket(ticket_id, message):
         "ticket": {
             "comment": {
                 "body": message,
-                "public": True  # Ensures the comment is visible to the requester
+                "public": True,
+                "author_id": requester_id
             }
         }
     }
     response = requests.put(url, json=payload, headers=headers, auth=auth)
     if response.status_code == 200:
-        logger.debug(f"Comment added to ticket {ticket_id}: {message}")
         return True, "Message sent to agent successfully!"
     else:
-        logger.error(f"Failed to update ticket {ticket_id}: {response.text}")
-        return False, f"Failed to send message to agent: {response.text}"
-
+        return False, f"Failed to send message: {response.text}"
+   
+ 
 def get_least_busy_agent(channel="support"):
     url = f"{ZENDESK_API_URL}/agent_availabilities"
     headers = {
@@ -490,22 +611,22 @@ def get_least_busy_agent(channel="support"):
         "Zendesk-Api-Version": "2023-02-01"
     }
     auth = (f"{ZENDESK_EMAIL}/token", ZENDESK_API_TOKEN)
-
+ 
     agent_ids_str = ",".join(str(agent_id) for agent_id in AGENT_IDS)
     params = {
         "filter[agent_id]": agent_ids_str,
         "filter[channel_status]": f"{channel}:online",
     }
-
+ 
     response = requests.get(url, params=params, headers=headers, auth=auth)
     if response.status_code != 200:
         raise Exception(f"Failed to fetch agent availability: {response.text}")
-
+ 
     data = response.json()
     agents = data.get("data", [])
     if not agents:
         raise Exception("No online agents found for channel 'support'.")
-
+ 
     agent_workloads = {}
     included_channels = {item["id"]: item["attributes"] for item in data.get("included", []) if item["type"] == "channels"}
     for agent in agents:
@@ -517,14 +638,14 @@ def get_least_busy_agent(channel="support"):
                 work_items = channel_data.get("work_item_count", 0)
                 agent_workloads[agent_id] = work_items
                 break
-
+ 
     if not agent_workloads:
         raise Exception(f"No workload data found for channel '{channel}'.")
-
+ 
     least_busy_agent = min(agent_workloads, key=agent_workloads.get)
     min_work_items = agent_workloads[least_busy_agent]
     return least_busy_agent, min_work_items
-
+ 
 def assign_ticket(ticket_id):
     try:
         agent_id, work_items = get_least_busy_agent(channel="support")
@@ -544,34 +665,32 @@ def assign_ticket(ticket_id):
             return f"Failed to assign ticket: {response.text}"
     except Exception as e:
         return f"Error during assignment: {str(e)}"
-
+ 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    global current_ticket_id, message_queue
+    global current_ticket_id, message_queue, requester_id
     data = request.json
     logger.debug(f"Webhook received: {data}")
-    
+
     ticket_id = data.get('ticket_id')
     if not ticket_id or ticket_id != str(current_ticket_id):
         logger.debug(f"Ignoring webhook - ticket_id {ticket_id} does not match current_ticket_id {current_ticket_id}")
         return jsonify({"status": "ignored"}), 200
 
     comment = data.get('ticket', {}).get('comment', {}).get('body')
-    author_id = data.get('ticket', {}).get('comment', {}).get('author_id')
+    author_role = data.get('ticket', {}).get('comment', {}).get('author_role')  # Get the new field
 
-    if comment and author_id:
-        author_id = int(author_id)
-        if author_id in AGENT_IDS:
-            logger.debug(f"Processing agent comment from {author_id}: {comment}")
+    if comment:
+        if author_role != "End-user":  # Process agent messages
             with message_lock:
-                message_queue.append(f"Agent (ID: {author_id}): {comment}")
+                message_queue.append(f"{author_role}: {comment}")
         else:
-            logger.debug(f"Skipping comment - author_id {author_id} is not an agent (likely requester)")
+            logger.debug(f"Skipping comment - unrecognized author_role: {author_role}")
     else:
-        logger.debug(f"Skipping comment - missing author_id or comment: {data}")
-    
-    return jsonify({"status": "received"}), 200
+        logger.debug(f"Skipping - no comment or author_role present in webhook payload: {data}")
 
+    return jsonify({"status": "received"}), 200
+ 
 @app.route('/stream')
 def stream():
     def event_stream():
@@ -579,35 +698,32 @@ def stream():
             with message_lock:
                 if message_queue:
                     yield f"data: {json.dumps({'response': message_queue.pop(0)})}\n\n"
-            time.sleep(1)
+            # time.sleep(1)
     return Response(event_stream(), mimetype="text/event-stream")
-
+ 
 @app.route('/')
 def home():
-    global current_ticket_id, message_queue
+    global current_ticket_id, message_queue, chat_history
     if not current_ticket_id:
         message_queue = []
+        chat_history = []
     return render_template('index.html')
-
+ 
 @app.route('/chat', methods=['POST'])
 def chat():
-    global current_ticket_id
-    user_input = request.json.get('message', '').lower().strip()
+    global current_ticket_id, requester_id, chat_history
+    user_input = request.json.get('message', '').strip()
     if not user_input:
         return jsonify({'response': "Please say something!"})
-
-    # If a ticket is active, send the message to Zendesk instead of processing locally
-    if current_ticket_id:
+ 
+    chat_history.append({"source": "User", "message": user_input})
+ 
+    if current_ticket_id:  # If a ticket exists (human handover)
         success, response = update_ticket(current_ticket_id, user_input)
-        if success:
-            # Optionally add the user's message to the local queue for display
-            with message_lock:
-                message_queue.append(f"You: {user_input}")
         return jsonify({'response': response})
-    
-    # Otherwise, handle with chatbot logic
-    if user_input == "human_handover":
-        ticket_id, create_response = create_ticket("Customer requested human agent.")
+ 
+    if user_input.lower() == "human_handover":
+        ticket_id, create_response = create_ticket(user_input)  # Pass user_input to include in transcript
         if ticket_id:
             current_ticket_id = ticket_id
             assign_response = assign_ticket(ticket_id)
@@ -615,9 +731,11 @@ def chat():
         else:
             response = create_response
     else:
-        response = responses.get(user_input, "I’m not sure how to respond to that. Ask for a human agent by clicking 'Talk to agent' button above")
+        response = responses.get(user_input.lower(), "I’m not sure how to respond to that. Ask for a human agent by clicking 'Talk to agent' button above")
+        chat_history.append({"source": "Bot", "message": response})
     return jsonify({'response': response})
-
+ 
+ 
 if __name__ == "__main__":
     ngrok.set_auth_token("2sL0plCt2Nt0XbX5xGcPwPpX2EQ_6NhM4CevXbvjA5BDugjNB")
     public_url = ngrok.connect(5000).public_url
